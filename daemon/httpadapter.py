@@ -20,6 +20,7 @@ raw URL paths and RESTful route definitions, and integrates with
 Request and Response objects to handle client-server communication.
 """
 
+import json
 from .request import Request
 from .response import Response
 from .dictionary import CaseInsensitiveDict
@@ -80,6 +81,7 @@ class HttpAdapter:
         #: Response
         self.response = Response()
 
+
     def handle_client(self, conn, addr, routes):
         """
         Handle an incoming client connection.
@@ -102,27 +104,58 @@ class HttpAdapter:
         # Response handler
         resp = self.response
 
-        # Handle the request
-        msg = conn.recv(1024).decode()
-        req.prepare(msg, routes)
+        try:
+            # Read full request
+            raw = conn.recv(4096).decode('utf-8')
+            print(f"[HttpAdapter] Received request from {addr}")
 
-        # Handle request hook
-        if req.hook:
-            print("[HttpAdapter] hook in route-path METHOD {} PATH {}".format(req.hook._route_path,req.hook._route_methods))
-            req.hook(headers = "bksysnet",body = "get in touch")
-            #
-            # TODO: handle for App hook here
-            #
+            # Prepare the request (parse + register hook)
+            req.prepare(raw, routes)
+            print(f"[HttpAdapter] Method: {getattr(req,'method','UNKNOWN')}, Path: {getattr(req,'path','UNKNOWN')}")
 
-        # Build response
-        response = resp.build_response(req)
+            # REST hook (WeApRous)
+            if req.hook:
+                print(f"[HttpAdapter] Hook found - METHOD {getattr(req.hook,'_route_methods',None)} PATH {getattr(req.hook,'_route_path',None)}")
+                try:
+                    # Call handler with the expected signature
+                    result = req.hook(headers=req.headers, body=req.body or "")
+                    # Normalize return for Response to render JSON
+                    if isinstance(result, (dict, list)):
+                        req.hook_response = {"result": result}
+                    elif isinstance(result, (str, bytes)):
+                        req.hook_response = {
+                            "message": result if isinstance(result, str)
+                            else result.decode("utf-8", "ignore")
+                        }
+                    else:
+                        req.hook_response = {"ok": True}
+                except Exception as e:
+                    import traceback; traceback.print_exc()
+                    req.hook_response = {"error": str(e)}
+            else:
+                print("[HttpAdapter] No hook found for this request")
 
-        #print(response)
-        conn.sendall(response)
-        conn.close()
+            # Build and send response
+            response_bytes = resp.build_response(req)
+            conn.sendall(response_bytes)
 
-    @property
-    def extract_cookies(self, req, resp):
+        except Exception:
+            import traceback; traceback.print_exc()
+            try:
+                conn.sendall(
+                    b"HTTP/1.1 500 Internal Server Error\r\n"
+                    b"Content-Type: text/plain\r\n\r\n"
+                    b"Internal Server Error"
+                )
+            except:
+                pass
+        finally:
+            try:
+                conn.close()
+            except:
+                pass
+
+    def extract_cookies(self, req):
         """
         Build cookies from the :class:`Request <Request>` headers.
 
@@ -131,12 +164,17 @@ class HttpAdapter:
         :rtype: cookies - A dictionary of cookie key-value pairs.
         """
         cookies = {}
-        for header in headers:
-            if header.startswith("Cookie:"):
-                cookie_str = header.split(":", 1)[1].strip()
-                for pair in cookie_str.split(";"):
-                    key, value = pair.strip().split("=")
-                    cookies[key] = value
+        headers = getattr(req, "headers", {}) or {}
+        cookie_str = headers.get("cookie")
+        
+        if not cookie_str:
+            return cookies
+        
+        for pair in cookie_str.split(";"):
+            pair = pair.strip()
+            if "=" in pair:
+                key, value = pair.split("=", 1)
+                cookies[key] = value
         return cookies
 
     def build_response(self, req, resp):
@@ -149,7 +187,7 @@ class HttpAdapter:
         response = Response()
 
         # Set encoding.
-        response.encoding = get_encoding_from_headers(response.headers)
+        response.encoding = self.get_encoding_from_headers(response.headers)
         response.raw = resp
         response.reason = response.raw.reason
 
@@ -159,7 +197,7 @@ class HttpAdapter:
             response.url = req.url
 
         # Add new cookies from the server.
-        response.cookies = extract_cookies(req)
+        response.cookies = self.extract_cookies(req)
 
         # Give the Response some context.
         response.request = req

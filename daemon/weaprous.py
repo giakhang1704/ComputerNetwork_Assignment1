@@ -11,7 +11,7 @@
 #
 
 """
-deamon.weaproute
+daemon.weaproute
 ~~~~~~~~~~~~~~~~~
 
 This module provides a WeApRous object to deploy RESTful url web app with routing
@@ -52,7 +52,6 @@ class WeApRous:
         self.routes = {}
         self.ip = None
         self.port = None
-        return
 
     def prepare_address(self, ip, port):
         """
@@ -73,6 +72,8 @@ class WeApRous:
 
         :rtype: function - A decorator that registers the handler function.
         """
+        if methods is None:
+            methods = ('GET',)
         def decorator(func):
             for method in methods:
                 self.routes[(method.upper(), path)] = func
