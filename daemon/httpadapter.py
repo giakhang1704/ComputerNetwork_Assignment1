@@ -113,8 +113,33 @@ class HttpAdapter:
             req.prepare(raw, routes)
             print(f"[HttpAdapter] Method: {getattr(req,'method','UNKNOWN')}, Path: {getattr(req,'path','UNKNOWN')}")
 
+            # =================== THÊM XỬ LÝ COOKIE LOGIN / ACCESS CONTROL =================== (Nhien)
+            path = getattr(req, "path", "/")
+            method = getattr(req, "method", "GET").upper()
+
+            if path == "/login" and method == "POST":
+                # Kiểm tra thông tin đăng nhập từ body
+                if "username=admin" in req.body and "password=password" in req.body:
+                    resp.status_code = 200
+                    resp.headers["Set-Cookie"] = "auth=true"
+                    resp.body = "<html><body><h1>Đăng nhập thành công!</h1></body></html>"
+                else:
+                    resp.status_code = 401
+                    resp.body = "<html><body><h1>401 Unauthorized - Sai tài khoản hoặc mật khẩu</h1></body></html>"
+
+            elif path == "/" and method == "GET":
+                # Kiểm tra cookie từ header của request
+                cookies = self.extract_cookies(req)
+                if cookies.get("auth") == "true":
+                    resp.status_code = 200
+                    resp.body = "<html><body><h1>Chào mừng quay lại, admin!</h1></body></html>"
+                else:
+                    resp.status_code = 401
+                    resp.body = "<html><body><h1>401 Unauthorized - Chưa đăng nhập</h1></body></html>"
+            # =================== HẾT PHẦN XỬ LÝ COOKIE LOGIN / ACCESS CONTROL ===============
+
             # REST hook (WeApRous)
-            if req.hook:
+            elif req.hook:
                 print(f"[HttpAdapter] Hook found - METHOD {getattr(req.hook,'_route_methods',None)} PATH {getattr(req.hook,'_route_path',None)}")
                 try:
                     # Call handler with the expected signature
@@ -154,6 +179,7 @@ class HttpAdapter:
                 conn.close()
             except:
                 pass
+
 
     def extract_cookies(self, req):
         """

@@ -142,9 +142,15 @@ def handle_client(ip, port, conn, addr, routes):
     request = conn.recv(1024).decode()
 
     # Extract hostname
+    # Thêm xử lý an toàn khi không có header Host (Nhien)
+    hostname = None
     for line in request.splitlines():
         if line.lower().startswith('host:'):
             hostname = line.split(':', 1)[1].strip()
+            break
+    if not hostname:
+        # Nếu không có header Host, gán mặc định theo IP và port (Nhien)
+        hostname = f"{ip}:{port}"
 
     print("[Proxy] {} at Host: {}".format(addr, hostname))
 

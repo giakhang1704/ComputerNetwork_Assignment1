@@ -189,13 +189,22 @@ class Request():
         # TODO prepare the request authentication
         #
 	# self.auth = ...
+        #  Nếu không truyền auth vào thì thử lấy từ URL (vd: http://user:pass@host) (Nhien)
+        if auth is None and url:
+            from .utils import get_auth_from_url
+            url_auth = get_auth_from_url(url)
+            print(f"[Request] URL auth extracted: {url_auth}")
+            auth = url_auth if url_auth != ("", "") else None
+
         try:
             if callable(auth):
                 r = auth(self)
                 if r is not None and hasattr(r, "__dict__"):
                     self.__dict__.update(r.__dict__)
-                    
-                self.prepare_content_length(self.body)
+
+            #  Dù có auth hay không, vẫn đảm bảo Content-Length hợp lệ
+            self.prepare_content_length(self.body)
+
         except Exception as e:
             print(f"[Request] prepare_auth error: {e}")
 
