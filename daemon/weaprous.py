@@ -72,8 +72,6 @@ class WeApRous:
 
         :rtype: function - A decorator that registers the handler function.
         """
-        if methods is None:
-            methods = ('GET',)
         def decorator(func):
             for method in methods:
                 self.routes[(method.upper(), path)] = func
