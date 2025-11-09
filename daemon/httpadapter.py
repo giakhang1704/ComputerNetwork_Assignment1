@@ -80,6 +80,29 @@ class HttpAdapter:
         self.request = Request()
         #: Response
         self.response = Response()
+        
+    def _recv_full_http(self, conn):
+        data = b""
+        conn.settimeout(2.0)
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+            if b"\r\n\r\n" in data:
+                head, body = data.split(b"\r\n\r\n", 1)
+                headers = head.decode(errors="ignore").split("\r\n")
+                cl = None
+                for line in headers:
+                    if line.lower().startswith("content-length:"):
+                        try:
+                            cl = int(line.split(":", 1)[1].strip())
+                        except:
+                            cl = None
+                        break
+                if cl is None or len(body) >= cl:
+                    break
+        return data.decode(errors="ignore")
 
 
     def handle_client(self, conn, addr, routes):
@@ -106,7 +129,7 @@ class HttpAdapter:
 
         try:
             # Read full request
-            raw = conn.recv(4096).decode('utf-8')
+            raw = self._recv_full_http(conn)
             print(f"[HttpAdapter] Received request from {addr}")
 
             # Prepare the request (parse + register hook)
@@ -119,9 +142,8 @@ class HttpAdapter:
                 try:
                     # Call handler with the expected signature
                     result = req.hook(headers=req.headers, body=req.body or "")
-                    # Normalize return for Response to render JSON
                     if isinstance(result, (dict, list)):
-                        req.hook_response = {"result": result}
+                        req.hook_response = result
                     elif isinstance(result, (str, bytes)):
                         req.hook_response = {
                             "message": result if isinstance(result, str)
