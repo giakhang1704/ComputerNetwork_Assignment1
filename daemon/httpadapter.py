@@ -117,30 +117,41 @@ class HttpAdapter:
         :param addr (tuple): The client's address.
         :param routes (dict): The route mapping for dispatching requests.
         """
-
-        # Connection handler.
         self.conn = conn        
-        # Connection address.
+
         self.connaddr = addr
-        # Request handler
+
         req = self.request
-        # Response handler
+
         resp = self.response
 
         try:
-            # Read full request
             raw = self._recv_full_http(conn)
             print(f"[HttpAdapter] Received request from {addr}")
 
-            # Prepare the request (parse + register hook)
             req.prepare(raw, routes)
+            path = req.path or "/"
+            method = (req.method or "GET").upper()
+            is_public = (
+                (method, path) == ("POST", "/login")
+                or path.endswith((".html", ".css", ".js", ".png", ".jpg", ".ico"))
+                or path == "/"  
+            )
+
+            if not is_public:
+                ck = (req.headers or {}).get("cookie", "")
+                if "auth=true" not in ck:
+                    resp.status_code = 401
+                    resp.headers["Content-Type"] = "application/json"
+                    resp.body = json.dumps({"ok": False, "error": "Unauthorized"})
+                    conn.sendall(resp.build_response(req))
+                    conn.close()
+                    return
             print(f"[HttpAdapter] Method: {getattr(req,'method','UNKNOWN')}, Path: {getattr(req,'path','UNKNOWN')}")
 
-            # REST hook (WeApRous)
             if req.hook:
                 print(f"[HttpAdapter] Hook found - METHOD {getattr(req.hook,'_route_methods',None)} PATH {getattr(req.hook,'_route_path',None)}")
                 try:
-                    # Call handler with the expected signature
                     result = req.hook(headers=req.headers, body=req.body or "")
                     if isinstance(result, (dict, list)):
                         req.hook_response = result
@@ -283,7 +294,7 @@ class HttpAdapter:
         #       username, password =...
         # we provide dummy auth here
         #
-        username, password = ("user1", "password")
+        username, password = ("admin", "password")
 
         if username:
             headers["Proxy-Authorization"] = (username, password)

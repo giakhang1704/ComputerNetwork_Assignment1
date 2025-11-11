@@ -1,95 +1,16 @@
-# #
-# # Copyright (C) 2025 pdnguyen of HCMC University of Technology VNU-HCM.
-# # All rights reserved.
-# # This file is part of the CO3093/CO3094 course,
-# # and is released under the "MIT License Agreement". Please see the LICENSE
-# # file that should have been included as part of this package.
-# #
-# # WeApRous release
-# #
-# # The authors hereby grant to Licensee personal permission to use
-# # and modify the Licensed Source Code for the sole purpose of studying
-# # while attending the course
-# #
-
-
-# """
-# start_sampleapp
-# ~~~~~~~~~~~~~~~~~
-
-# This module provides a sample RESTful web application using the WeApRous framework.
-
-# It defines basic route handlers and launches a TCP-based backend server to serve
-# HTTP requests. The application includes a login endpoint and a greeting endpoint,
-# and can be configured via command-line arguments.
-# """
-
-# import json
-# import socket
-# import argparse
-
-# from daemon.weaprous import WeApRous
-
-# PORT = 8000  # Default port
-
-# app = WeApRous()
-
-# @app.route('/login', methods=['POST'])
-# def login(headers="guest", body="anonymous"):
-#     """
-#     Handle user login via POST request.
-
-#     This route simulates a login process and prints the provided headers and body
-#     to the console.
-
-#     :param headers (str): The request headers or user identifier.
-#     :param body (str): The request body or login payload.
-#     """
-#     print("[SampleApp] Logging in {} to {}".format(headers, body))
-
-# @app.route('/hello', methods=['PUT'])
-# def hello(headers, body):
-#     """
-#     Handle greeting via PUT request.
-
-#     This route prints a greeting message to the console using the provided headers
-#     and body.
-
-#     :param headers (str): The request headers or user identifier.
-#     :param body (str): The request body or message payload.
-#     """
-#     print("[SampleApp] ['PUT'] Hello in {} to {}".format(headers, body))
-
-# if __name__ == "__main__":
-#     # Parse command-line arguments to configure server IP and port
-#     parser = argparse.ArgumentParser(prog='Backend', description='', epilog='Beckend daemon')
-#     parser.add_argument('--server-ip', default='0.0.0.0')
-#     parser.add_argument('--server-port', type=int, default=PORT)
- 
-#     args = parser.parse_args()
-#     ip = args.server_ip
-#     port = args.server_port
-
-#     # Prepare and launch the RESTful application
-#     app.prepare_address(ip, port)
-#     app.run()
-
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import argparse
 import time
 from urllib.parse import parse_qs 
 
-# Nếu package của bạn tên 'daemon', giữ nguyên import dưới:
+
 from daemon.weaprous import WeApRous
 
 # -----------------------------
 # Trạng thái trong bộ nhớ (demo)
 # -----------------------------
 state = {
-    "peers": {},      # peer_id -> {"ip": "...", "port": 5001, "last_seen": ts}
-    "channels": {},   # chan -> {"members": set(peer_id), "messages": [ {seq, from, text, ts} ]}
+    "peers": {},      
+    "channels": {},   
     "seq": 0
 }
 
@@ -98,7 +19,7 @@ def _parse_form(body: str) -> dict:
     if not body:
         return {}
     qs = parse_qs(body, keep_blank_values=True, encoding="utf-8", errors="strict")
-    # parse_qs returns lists; flatten to last item
+
     return {k: (v[-1] if isinstance(v, list) else v) for k, v in qs.items()}
 
 def _require_auth(headers: dict) -> bool:
@@ -111,13 +32,11 @@ def _require_auth(headers: dict) -> bool:
 # -----------------------------
 app = WeApRous()
 
-@app.route("/login", methods=["POST"])
+@app.route("/login", methods=["POST", "PUT"])
 def login(headers, body):
     """Demo login: chấp nhận mọi username/password, yêu cầu client tự set Cookie: auth=true."""
     f = _parse_form(body)
     print("[SampleApp] Logging in {} to {}".format(headers, body))
-    # Ở phiên bản HttpAdapter hiện tại, handler trả dict -> Response tự set JSON.
-    # (Nếu bạn muốn set Set-Cookie header, cần sửa HttpAdapter để hỗ trợ tuple (status, headers, body))
     return {"ok": True, "hint": "Client hãy gửi Cookie: auth=true cho các API chat"}
 
 @app.route("/peer/register", methods=["POST"])
@@ -160,11 +79,11 @@ def channel_join(headers, body):
         return {"ok": False, "error": "Missing name/peer_id"}
     ch = state["channels"].setdefault(name, {"members": set(), "messages": []})
     ch["members"].add(peer_id)
-    # Trả danh sách peers hiện có trong kênh để client có thể (tuỳ chọn) kết nối P2P
+    # Trả danh sách peers hiện có trong kênh để client có thể kết nối P2P
     members = [p for p in ch["members"] if p in state["peers"]]
     peers_info = {p: state["peers"][p] for p in members}
     print("[SampleApp] channel_join:", name, "->", members)
-    # set() không JSON được, trả list
+
     return {"ok": True, "peers": peers_info, "members": list(ch["members"])}
 
 @app.route("/message", methods=["POST"])
@@ -181,7 +100,6 @@ def send_message(headers, body):
     state["seq"] += 1
     msg = {"seq": state["seq"], "from": sender, "text": text, "ts": time.time()}
     ch["messages"].append(msg)
-    # (Tuỳ chọn) tại đây có thể implement server-relay đến peers qua TCP.
     print("[SampleApp] message:", msg)
     return {"ok": True, "seq": state["seq"]}
 
@@ -189,7 +107,6 @@ def send_message(headers, body):
 def sync(headers, body):
     if not _require_auth(headers):
         return {"ok": False, "error": "Unauthorized"}
-    # Ở đây demo dùng form; nếu GET + query, bạn có thể tự parse headers['path'] nếu muốn
     f = _parse_form(body)
     name = f.get("name")
     after = int(f.get("after", "0"))
@@ -197,15 +114,39 @@ def sync(headers, body):
     delta = [m for m in ch["messages"] if int(m.get("seq", 0)) > after]
     return {"ok": True, "messages": delta}
 
-@app.route("/hello", methods=["PUT"])   # hoặc ["GET","PUT"] nếu muốn test cả GET
+@app.route("/hello", methods=["PUT"])  
 def hello(headers, body):
-    # body có thể rỗng nếu client không gửi payload
     return {
         "ok": True,
         "route": "/hello",
         "method": headers.get("x-http-method-override", "PUT"),
         "received": body or ""
     }
+    
+
+@app.route("/submit-info", methods=["POST"])
+def submit_info(headers, body):
+    return peer_register(headers, body)
+
+@app.route("/add-list", methods=["POST"])
+def add_list(headers, body):
+    return channel_create(headers, body)
+
+@app.route("/get-list", methods=["POST"])
+def get_list(headers, body):
+    return channel_join(headers, body)
+
+@app.route("/connect-peer", methods=["POST"])
+def connect_peer(headers, body):
+    return channel_join(headers, body)
+
+@app.route("/broadcast-peer", methods=["POST"])
+def broadcast_peer(headers, body):
+    return send_message(headers, body)
+
+@app.route("/send-peer", methods=["POST"])
+def send_peer(headers, body):
+    return send_message(headers, body)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -215,6 +156,8 @@ def main():
 
     app.prepare_address(args.server_ip, args.server_port)
     app.run()
+
+
 
 if __name__ == "__main__":
     main()
