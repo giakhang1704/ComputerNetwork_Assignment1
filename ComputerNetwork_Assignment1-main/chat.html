@@ -1,0 +1,185 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>WeApRous – Chat UI (Client–Server)</title>
+<style>
+  :root { --bg:#0b1220; --card:#121a2a; --muted:#96a0b5; --acc:#3ea6ff; }
+  body{ margin:0; font:14px/1.4 system-ui,Segoe UI,Arial; background:var(--bg); color:#e6eefc;}
+  header{ padding:16px 20px; background:#0d1728; border-bottom:1px solid #1d2a42;}
+  h1{ margin:0; font-size:18px; letter-spacing:.3px;}
+  main{ display:grid; grid-template-columns:320px 1fr; gap:16px; padding:16px;}
+  .card{ background:var(--card); border:1px solid #1d2a42; border-radius:12px; padding:16px;}
+  .row{ display:flex; gap:8px; align-items:center; margin:8px 0;}
+  label{ width:100px; color:var(--muted); font-size:12px; }
+  input,button,select,textarea{
+    background:#0e1524; border:1px solid #1d2a42; color:#e6eefc; border-radius:8px; padding:8px 10px;
+  }
+  input,select,textarea{ flex:1; }
+  button{ cursor:pointer; }
+  button.primary{ background:var(--acc); border-color:#2c8cd8; color:#001a2b; font-weight:600;}
+  small.hint{ color:var(--muted); display:block; margin-top:6px;}
+  .messages{ height:60vh; overflow:auto; display:flex; flex-direction:column; gap:8px; padding-right:6px;}
+  .msg{ padding:8px 10px; border-radius:10px; max-width:80%; }
+  .me{ background:#19324d; align-self:flex-end;}
+  .other{ background:#0f2236; align-self:flex-start;}
+  .meta{ color:#9ab0c9; font-size:11px; margin-bottom:4px;}
+  .inputbar{ display:flex; gap:8px; margin-top:10px;}
+  .ok{ color:#4ce38a; } .err{ color:#ff6b6b; }
+  code{ background:#0e1524; padding:2px 6px; border-radius:6px; }
+</style>
+
+<header><h1>WeApRous – Chat UI (Client–Server)</h1></header>
+
+<main>
+  <!-- PANEL TRÁI -->
+  <section class="card">
+    <h3>Tham số Chat</h3>
+    <div class="row"><label>Peer ID</label><input id="peerId" value="A"></div>
+    <div class="row"><label>Channel</label><input id="channel" value="room"></div>
+    <div class="row">
+      <button id="btnCreate">Tạo kênh mới</button>
+      <button id="btnJoin" class="primary">Gia nhập kênh</button>
+    </div>
+    <small class="hint">Sau khi join, UI sẽ tự động <em>poll</em> <code>/sync</code> mỗi 1s để lấy tin mới.</small>
+
+    <h3>Đăng ký client</h3>
+    <div class="row"><label>IP</label><input id="ip" value="127.0.0.1"></div>
+    <div class="row"><label>Port</label><input id="port" value="0"></div>
+    <div class="row"><button id="btnRegister">Đăng ký</button></div>
+  </section>
+
+  <!-- PANEL PHẢI: cửa sổ chat -->
+  <section class="card">
+    <div id="roomTitle" class="hint">Chưa tham gia kênh.</div>
+    <div id="messages" class="messages" aria-live="polite"></div>
+    <div class="inputbar">
+      <input id="text" placeholder="Nhập tin nhắn và Enter để gửi…">
+      <button id="btnSend" class="primary">Gửi</button>
+    </div>
+    <small class="hint">
+      Tin nhắn gửi qua <code>/message</code> và hiển thị qua <code>/sync</code> (polling). 
+    </small>
+    <div id="lastInfo" class="hint"></div>
+  </section>
+</main>
+
+<script>
+  // --- Nếu chưa có cookie auth=true thì chuyển sang login ---
+  if (!document.cookie.split('; ').includes('auth=true')) {
+    window.location.replace('/login.html');
+  }
+
+  // ---------- CẤU HÌNH CƠ BẢN ----------
+  const $ = (q)=>document.querySelector(q);
+  const peerIdEl   = $('#peerId');
+  const chanEl     = $('#channel');
+  const ipEl       = $('#ip');
+  const portEl     = $('#port');
+  const msgsEl     = $('#messages');
+  const roomTitle  = $('#roomTitle');
+  const lastInfo   = $('#lastInfo');
+  const textEl     = $('#text');
+
+  // Lưu cục bộ để nhớ lần sau
+  (function restore(){
+    const s = JSON.parse(localStorage.getItem('weaprous-ui')||'{}');
+    if(s.peerId)  peerIdEl.value=s.peerId;
+    if(s.channel) chanEl.value=s.channel;
+  })();
+  function saveState(){
+    localStorage.setItem('weaprous-ui', JSON.stringify({
+      peerId: peerIdEl.value.trim(),
+      channel: chanEl.value.trim()
+    }));
+  }
+
+  function htmlesc(s){ return s.replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+  function appendMsg(m, me=false){
+    const box = document.createElement('div');
+    box.className = 'msg '+(me?'me':'other');
+    if(m.from || m.peer_id){
+      const meta = document.createElement('div');
+      meta.className='meta';
+      meta.textContent = `[${m.from||m.peer_id}] ${new Date((m.ts||Date.now())*1000||Date.now()).toLocaleTimeString()}`;
+      box.appendChild(meta);
+    }
+    const p = document.createElement('div');
+    p.innerHTML = htmlesc(m.text||'');
+    box.appendChild(p);
+    msgsEl.appendChild(box);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  }
+
+  async function post(path, data){
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      body: new URLSearchParams(data),
+      credentials: 'include' // gửi cookie kèm theo
+    });
+    const txt = await res.text();
+    let js=null; try{ js=JSON.parse(txt); }catch(e){}
+    return {ok:res.ok, status:res.status, text:txt, json:js};
+  }
+
+  // ---------- REGISTER / CREATE / JOIN ----------
+  $('#btnRegister').onclick = async ()=>{
+    saveState();
+    const r = await post('/peer/register', {
+      peer_id: peerIdEl.value.trim(),
+      ip:      ipEl.value.trim(),
+      port:    portEl.value.trim()
+    });
+    lastInfo.textContent = `/peer/register -> ${r.status} ${r.text}`;
+  };
+
+  $('#btnCreate').onclick = async ()=>{
+    saveState();
+    const r = await post('/channel/create', { name: chanEl.value.trim() });
+    lastInfo.textContent = `/channel/create -> ${r.status} ${r.text}`;
+  };
+
+  let syncTimer = null;
+  let lastSeq = 0;
+
+  $('#btnJoin').onclick = async ()=>{
+    saveState();
+    const name = chanEl.value.trim();
+    const peer = peerIdEl.value.trim();
+    const r = await post('/channel/join', { name, peer_id: peer });
+    roomTitle.textContent = `Đang ở kênh #${name} với Peer ID "${peer}"`;
+    lastInfo.textContent = `/channel/join -> ${r.status}`;
+    msgsEl.innerHTML=''; lastSeq=0;
+
+    if(syncTimer) clearInterval(syncTimer);
+    syncTimer = setInterval(async ()=>{
+      try{
+        const s = await post('/sync', { name, after: String(lastSeq) });
+        if(!s.ok) return;
+        let list = null;
+        if(s.json && Array.isArray(s.json.messages)) list = s.json.messages;
+        else if(s.json && Array.isArray(s.json.result)) list = s.json.result;
+        else if(s.json && s.json.data && Array.isArray(s.json.data.messages)) list = s.json.data.messages;
+
+        if(Array.isArray(list)){
+          for(const m of list){
+            appendMsg(m, (m.from||m.peer_id)===peer);
+            if(typeof m.seq==='number') lastSeq = Math.max(lastSeq, m.seq);
+          }
+        }
+      }catch(e){}
+    }, 1000);
+  };
+
+  // ---------- SEND ----------
+  async function sendNow(){
+    const txt = textEl.value.trim();
+    if(!txt) return;
+    const name = chanEl.value.trim();
+    const peer = peerIdEl.value.trim();
+    const r = await post('/message', { name, peer_id: peer, text: txt });
+    if(r.ok) { appendMsg({from:peer,text:txt,ts:Date.now()/1000}, true); textEl.value=''; }
+    else { lastInfo.textContent = `/message -> ${r.status} ${r.text}`; }
+  }
+  document.getElementById('btnSend').onclick = sendNow;
+  textEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); sendNow(); }});
+</script>

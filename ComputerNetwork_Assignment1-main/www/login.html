@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>WeApRous – Đăng nhập</title>
+<style>
+  :root { --bg:#0b1220; --card:#121a2a; --muted:#96a0b5; --acc:#3ea6ff; }
+  *{box-sizing:border-box}
+  body{ margin:0; font:14px/1.4 system-ui,Segoe UI,Arial; background:var(--bg); color:#e6eefc;}
+  header{ padding:18px 22px; background:#0d1728; border-bottom:1px solid #1d2a42;}
+  h1{ margin:0; font-size:18px; letter-spacing:.3px;}
+  main{ display:grid; place-items:center; min-height:calc(100vh - 64px); padding:24px;}
+  .card{ width:min(460px, 92vw); background:var(--card); border:1px solid #1d2a42; border-radius:14px; padding:22px 20px; box-shadow:0 8px 20px rgba(0,0,0,.25);}
+  .title{ font-size:20px; margin:0 0 14px; }
+  .row{ display:flex; gap:10px; align-items:center; margin:10px 0;}
+  label{ width:110px; color:var(--muted); font-size:12px; }
+  input[type="text"], input[type="password"]{
+    flex:1; background:#0e1524; border:1px solid #1d2a42; color:#e6eefc;
+    border-radius:10px; padding:10px 12px;
+  }
+  .actions{ display:flex; justify-content:flex-end; margin-top:14px; }
+  button{
+    background:#0e1524; border:1px solid #1d2a42; color:#e6eefc; border-radius:10px; padding:10px 14px;
+    cursor:pointer;
+  }
+  button.primary{ background:var(--acc); border-color:#2c8cd8; color:#001a2b; font-weight:600;}
+  .muted{ color:var(--muted); font-size:12px; margin-top:10px; min-height:18px;}
+  .ok{ color:#4ce38a; } .err{ color:#ff6b6b; }
+</style>
+
+<header><h1>WeApRous – Đăng nhập</h1></header>
+
+<main>
+  <section class="card">
+    <h2 class="title">Đăng nhập</h2>
+
+    <form id="fLogin">
+      <div class="row">
+        <label>Username</label>
+        <input name="username" type="text" value="admin" autocomplete="username" />
+      </div>
+      <div class="row">
+        <label>Password</label>
+        <input name="password" type="password" value="password" autocomplete="current-password" />
+      </div>
+
+      <div class="actions">
+        <button class="primary">Đăng nhập</button>
+      </div>
+      <div id="status" class="muted"></div>
+    </form>
+  </section>
+</main>
+
+<script>
+  async function postLogin(fd){
+    const res = await fetch('/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      body: new URLSearchParams(fd),
+      credentials: 'include'
+    });
+    const txt = await res.text();
+    let js=null; try{ js=JSON.parse(txt); }catch(e){}
+    return {ok:res.ok, status:res.status, text:txt, json:js};
+  }
+
+  const statusEl = document.getElementById('status');
+  
+  document.getElementById('fLogin').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    statusEl.textContent = 'Đang đăng nhập...';
+    try{
+      const r = await postLogin(new FormData(e.target));
+      if(r.ok){
+        // Server demo không set-cookie → tự đặt cookie client-side
+        document.cookie = 'auth=true; Path=/';
+        statusEl.textContent = '';
+        window.open('/index.html', '_blank');
+      }else{
+        statusEl.innerHTML = '<span class="err">Đăng nhập thất bại: ' + r.status + '</span>';
+      }
+    }catch{
+      statusEl.innerHTML = '<span class="err">Lỗi kết nối.</span>';
+    }
+  });
+</script>
